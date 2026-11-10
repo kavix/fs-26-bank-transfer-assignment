@@ -14,6 +14,7 @@ import org.springframework.context.support.DefaultMessageSourceResolvable;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.validation.BindingResult;
+import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,6 +26,7 @@ import java.math.BigDecimal;
 
 @Controller
 @RequiredArgsConstructor
+@CrossOrigin(origins = "*")
 public class BankController {
 
     private final BankService bankService;
@@ -44,6 +46,7 @@ public class BankController {
 
         model.addAttribute("allCustomers", customerRepository.findAllOrdered());
         model.addAttribute("transferRequest", new TransferRequest());
+        model.addAttribute("customer", new Customer());
         model.addAttribute("newCustomer", new Customer());
         model.addAttribute("totalCustomers", customerRepository.countCustomersNative());
         model.addAttribute("totalBalance", totalBalance != null ? totalBalance : BigDecimal.ZERO);
@@ -56,7 +59,7 @@ public class BankController {
     }
 
     @PostMapping("/customers")
-    public String addCustomer(@Valid @ModelAttribute("newCustomer") Customer customer,
+    public String addCustomer(@Valid @ModelAttribute("customer") Customer customer,
                               BindingResult bindingResult,
                               RedirectAttributes redirectAttributes) {
         if (bindingResult.hasErrors()) {
@@ -108,7 +111,7 @@ public class BankController {
                         e.getMessage()
                 );
             } catch (Exception auditEx) {
-                // Ignore audit failure to let the main error surface
+                // Ignore audit failure to let main error surface
             }
             redirectAttributes.addFlashAttribute("error", e.getMessage());
         }
@@ -121,11 +124,60 @@ public class BankController {
         Customer customer = customerRepository.getByAccountNumber(accountNumber)
                 .orElseThrow(() -> new AccountNotFoundException(accountNumber));
 
+        BigDecimal totalSent = bankTransactionRepository.getTotalSent(accountNumber);
+
         model.addAttribute("customer", customer);
         model.addAttribute("accountNumber", accountNumber);
         model.addAttribute("transactions", bankTransactionRepository.findHistory(accountNumber));
-        model.addAttribute("totalSent", BigDecimal.ZERO);
+        model.addAttribute("totalSent", totalSent != null ? totalSent : BigDecimal.ZERO);
 
         return "history";
+    }
+
+    // ===== Task 12 Extensions =====
+
+    @GetMapping("/large-transfers")
+    public String largeTransfers(@RequestParam(value = "min", defaultValue = "10000") BigDecimal min, Model model) {
+        model.addAttribute("transfers", bankTransactionRepository.findLargeTransfers(min));
+        model.addAttribute("min", min);
+        return "large-transfers";
+    }
+
+    @GetMapping("/deposit")
+    public String showDepositForm(Model model) {
+        model.addAttribute("customers", customerRepository.findAllOrdered());
+        return "deposit";
+    }
+
+    @PostMapping("/deposit")
+    public String deposit(@RequestParam("accountNumber") String accountNumber,
+                          @RequestParam("amount") BigDecimal amount,
+                          RedirectAttributes redirectAttributes) {
+        try {
+            bankService.deposit(accountNumber, amount);
+            redirectAttributes.addFlashAttribute("success", "Deposited LKR " + amount + " to account " + accountNumber + " successfully!");
+        } catch (Exception e) {
+            redirectAttributes.addFlashAttribute("error", "Deposit failed: " + e.getMessage());
+        }
+        return "redirect:/deposit";
+    }
+
+    @GetMapping("/withdraw")
+    public String showWithdrawForm(Model model) {
+        model.addAttribute("customers", customerRepository.findAllOrdered());
+        return "withdraw";
+    }
+
+    @PostMapping("/withdraw")
+    public String withdraw(@RequestParam("accountNumber") String accountNumber,
+                           @RequestParam("amount") BigDecimal amount,
+                           RedirectAttributes redirectAttributes) {
+        try {
+            bankService.withdraw(accountNumber, amount);
+            redirectAttributes.addFlashAttribute("success", "Withdrew LKR " + amount + " from account " + accountNumber + " successfully!");
+        } catch (Exception e) {
+            redirectAttributes.addFlashAttribute("error", "Withdrawal failed: " + e.getMessage());
+        }
+        return "redirect:/withdraw";
     }
 }
